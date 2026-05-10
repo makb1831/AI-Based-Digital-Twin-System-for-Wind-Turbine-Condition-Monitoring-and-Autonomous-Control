@@ -21,15 +21,21 @@ const io = new Server(httpServer, {
 });
 
 const PORT = 3000;
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = path.join(process.cwd(), '.runtime');
 const HISTORY_FILE = path.join(DATA_DIR, 'telemetry-history.json');
 const HISTORY_LIMIT = 720;
 const AI_REFRESH_MS = 45000;
+const ROTOR_AREA_M2 = 11309;
+const RATED_POWER_MW = 3.5;
 
 app.use(express.json());
 
 let state: TelemetryState = {
   windSpeed: 8.5,
+  windDirection: 15,
+  airDensity: 1.225,
+  ambientTemperature: 24,
+  turbulence: 0.12,
   rotorSpeed: 15.0,
   powerGenerated: 1.2,
   temperature: 65,
@@ -51,6 +57,15 @@ let lastPersistAt = 0;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function wrapAngle(angle: number) {
+  const wrapped = angle % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
+function shortestAngleDifference(a: number, b: number) {
+  return ((a - b + 540) % 360) - 180;
 }
 
 function approach(current: number, target: number, step: number) {
@@ -75,20 +90,21 @@ function createAlert(type: AlertEvent['type'], message: string) {
 function buildFallbackAiReport(snapshot: TelemetryState, reason: string): AIDiagnosticReport {
   const healthScore = clamp(
     100
-      - (snapshot.temperature > 80 ? (snapshot.temperature - 80) * 1.1 : 0)
-      - (snapshot.vibration > 3 ? (snapshot.vibration - 3) * 10 : 0)
-      - (snapshot.status === 'warning' ? 12 : 0)
+      - (snapshot.temperature > 80 ? (snapshot.temperature - 80) * 1.15 : 0)
+      - (snapshot.vibration > 3 ? (snapshot.vibration - 3) * 9 : 0)
+      - (snapshot.brakingSystem ? 8 : 0)
+      - (snapshot.status === 'warning' ? 10 : 0)
       - (snapshot.status === 'critical' ? 28 : 0),
     0,
     100,
   );
 
   return {
-    analysis: `Local diagnostic fallback active. ${reason} Current telemetry is ${snapshot.status}, with ${snapshot.windSpeed.toFixed(1)} m/s wind and ${snapshot.temperature.toFixed(1)} °C operating temperature.`,
+    analysis: `Local diagnostic fallback active. ${reason} Current telemetry is ${snapshot.status}, with ${snapshot.windSpeed.toFixed(1)} m/s wind, ${snapshot.turbulence.toFixed(2)} turbulence, and ${snapshot.temperature.toFixed(1)} °C operating temperature.`,
     recommendation: snapshot.status === 'critical'
       ? 'Engage braking, reduce pitch, and inspect thermal and vibration limits.'
       : snapshot.status === 'warning'
-        ? 'Hold a cautious operating regime and monitor temperature and vibration trends.'
+        ? 'Hold a cautious operating regime and monitor temperature, vibration, and yaw alignment.'
         : 'Maintain the present settings and continue watching the live trend.',
     healthScore,
     generatedAt: Date.now(),
@@ -103,10 +119,11 @@ function buildSystemReport(samples: TelemetryState[]): SystemReport {
     (acc, point) => ({
       power: acc.power + point.powerGenerated,
       wind: acc.wind + point.windSpeed,
+      windDirection: acc.windDirection + point.windDirection,
       temperature: acc.temperature + point.temperature,
       vibration: acc.vibration + point.vibration,
     }),
-    { power: 0, wind: 0, temperature: 0, vibration: 0 },
+    { power: 0, wind: 0, windDirection: 0, temperature: 0, vibration: 0 },
   );
 
   const statusCounts = source.reduce(
@@ -135,6 +152,7 @@ function buildSystemReport(samples: TelemetryState[]): SystemReport {
   const trend = {
     power: average(trendWindow, (item) => item.powerGenerated) - average(trendBaseline, (item) => item.powerGenerated),
     windSpeed: average(trendWindow, (item) => item.windSpeed) - average(trendBaseline, (item) => item.windSpeed),
+    windDirection: average(trendWindow, (item) => item.windDirection) - average(trendBaseline, (item) => item.windDirection),
     temperature: average(trendWindow, (item) => item.temperature) - average(trendBaseline, (item) => item.temperature),
     vibration: average(trendWindow, (item) => item.vibration) - average(trendBaseline, (item) => item.vibration),
   };
@@ -146,7 +164,7 @@ function buildSystemReport(samples: TelemetryState[]): SystemReport {
   }
 
   if (maxTemperature > 82) {
-    recommendations.push('Increase blade pitch slightly during high load to reduce thermal stress.');
+    recommendations.push('Increase blade pitch during high load to reduce thermal stress.');
   }
 
   if (maxVibration > 4.5) {
@@ -172,6 +190,12 @@ function buildSystemReport(samples: TelemetryState[]): SystemReport {
     trend,
     recommendations,
     recentAlerts: alertFeed.slice(0, 10),
+    environment: {
+      ambientTemperature: source[source.length - 1].ambientTemperature,
+      airDensity: source[source.length - 1].airDensity,
+      turbulence: source[source.length - 1].turbulence,
+      windDirection: source[source.length - 1].windDirection,
+    },
   };
 }
 
@@ -224,6 +248,10 @@ Analyze the following real-time telemetry data and provide a short diagnostic re
 
 Telemetry:
 - Wind Speed: ${snapshot.windSpeed.toFixed(2)} m/s
+- Wind Direction: ${snapshot.windDirection.toFixed(2)} degrees
+- Air Density: ${snapshot.airDensity.toFixed(3)} kg/m^3
+- Ambient Temperature: ${snapshot.ambientTemperature.toFixed(2)} °C
+- Turbulence: ${snapshot.turbulence.toFixed(2)}
 - Rotor Speed: ${snapshot.rotorSpeed.toFixed(2)} RPM
 - Power Generated: ${snapshot.powerGenerated.toFixed(2)} MW
 - Temperature: ${snapshot.temperature.toFixed(2)} °C
@@ -271,64 +299,87 @@ Keep the response concise and practical.
   return cachedAiReport ?? buildFallbackAiReport(snapshot, 'No AI report is available.');
 }
 
+function updateEnvironmentalState() {
+  state.windSpeed = clamp(state.windSpeed + (Math.random() - 0.5) * (0.5 + state.turbulence), 0, 35);
+  state.windDirection = wrapAngle(state.windDirection + (Math.random() - 0.5) * (2 + state.turbulence * 18));
+  state.airDensity = clamp(state.airDensity + (Math.random() - 0.5) * 0.004, 1.0, 1.32);
+  state.ambientTemperature = clamp(state.ambientTemperature + (Math.random() - 0.5) * 0.2, -10, 45);
+  state.turbulence = clamp(state.turbulence + (Math.random() - 0.5) * 0.02, 0.02, 0.45);
+}
+
 setInterval(() => {
   const previousState = { ...state };
 
-  state.windSpeed = clamp(state.windSpeed + (Math.random() - 0.5) * 0.7, 0, 35);
+  if (!state.aiAutoMode) {
+    updateEnvironmentalState();
+  } else {
+    state.windSpeed = clamp(state.windSpeed + (Math.random() - 0.5) * (0.35 + state.turbulence * 0.6), 0, 35);
+    state.windDirection = wrapAngle(state.windDirection + (Math.random() - 0.5) * (1.5 + state.turbulence * 12));
+  }
+
+  const yawError = shortestAngleDifference(state.windDirection, state.yaw);
+  const alignmentFactor = clamp(Math.cos((yawError * Math.PI) / 180), 0.08, 1);
+  const pitchFactor = clamp(1 - state.bladePitch / 95, 0.08, 1);
+  const turbulencePenalty = clamp(1 - state.turbulence * 0.45, 0.6, 1);
+  const densityFactor = state.airDensity / 1.225;
+  const windBeforeBrake = state.windSpeed * alignmentFactor * turbulencePenalty;
 
   if (state.aiAutoMode) {
-    const pitchTarget = state.windSpeed > 26 ? 38 : state.windSpeed > 22 ? 24 : state.temperature > 80 ? 14 : 0;
-    state.bladePitch = clamp(approach(state.bladePitch, pitchTarget, 1.8), 0, 90);
-    state.yaw = clamp(approach(state.yaw, 0, 2.5), -180, 180);
+    const targetPitch = state.windSpeed > 24 || state.turbulence > 0.24
+      ? 34
+      : state.windSpeed > 18
+        ? 18
+        : state.powerGenerated > 2.8
+          ? 10
+          : 0;
+    state.bladePitch = clamp(approach(state.bladePitch, targetPitch, 1.5), 0, 90);
+
+    const targetYaw = wrapAngle(state.windDirection);
+    const currentYaw = state.yaw;
+    const yawStep = shortestAngleDifference(targetYaw, currentYaw);
+    state.yaw = wrapAngle(currentYaw + clamp(yawStep, -3, 3));
   }
 
-  const effectiveWind = Math.max(0, state.windSpeed - 3);
-  const yawAlignment = 1 - clamp(Math.abs(state.yaw) / 180, 0, 1) * 0.18;
-  const pitchAlignment = 1 - clamp(state.bladePitch / 90, 0, 1) * 0.35;
-  const aerodynamicTarget = state.brakingSystem ? 0 : effectiveWind * 2.6 * yawAlignment * pitchAlignment;
+  const effectiveWind = Math.max(0, windBeforeBrake * pitchFactor);
+  const cp = clamp(0.48 - state.bladePitch * 0.0035 - state.turbulence * 0.12, 0.08, 0.48);
+  const rotorTargetSpeed = state.brakingSystem ? 0 : effectiveWind * 9.2 * alignmentFactor * (0.8 + cp);
 
-  state.rotorSpeed += (aerodynamicTarget - state.rotorSpeed) * (state.brakingSystem ? 0.18 : 0.08);
+  state.rotorSpeed += (rotorTargetSpeed - state.rotorSpeed) * (state.brakingSystem ? 0.22 : 0.09);
   if (state.brakingSystem) {
-    state.rotorSpeed *= 0.82;
+    state.rotorSpeed *= 0.78;
   }
-  state.rotorSpeed = clamp(state.rotorSpeed + (Math.random() - 0.5) * 0.12, 0, 42);
+  state.rotorSpeed = clamp(state.rotorSpeed + (Math.random() - 0.5) * (0.08 + state.turbulence * 0.12), 0, 44);
 
-  const cutIn = 3.5;
-  const ratedWind = 12.5;
-  const cutOut = 28;
-  const ratedPower = 3.2;
-  let windPower = 0;
+  const aerodynamicPower = 0.5 * state.airDensity * ROTOR_AREA_M2 * Math.pow(effectiveWind, 3) * cp;
+  const powerMW = clamp((aerodynamicPower / 1_000_000) * densityFactor, 0, RATED_POWER_MW * 1.08);
+  state.powerGenerated = state.brakingSystem ? 0 : powerMW;
 
-  if (!state.brakingSystem) {
-    if (state.windSpeed >= cutIn && state.windSpeed < ratedWind) {
-      const ratio = (state.windSpeed - cutIn) / (ratedWind - cutIn);
-      windPower = ratedPower * Math.pow(ratio, 3);
-    } else if (state.windSpeed >= ratedWind && state.windSpeed < cutOut) {
-      windPower = ratedPower;
-    }
-  }
+  const heatingFromLoad = state.powerGenerated * 3.1 + Math.max(0, state.rotorSpeed - 16) * 0.16 + state.turbulence * 2.3;
+  const cooling = (state.temperature - state.ambientTemperature) * 0.07 + state.windSpeed * 0.03;
+  state.temperature = clamp(state.temperature + heatingFromLoad - cooling + (state.brakingSystem ? 1.4 : 0), state.ambientTemperature, 110);
 
-  const rotorEfficiency = clamp(0.45 + state.rotorSpeed / 55, 0, 1) * yawAlignment * pitchAlignment;
-  state.powerGenerated = clamp(windPower * rotorEfficiency, 0, ratedPower * 1.05);
-
-  const heatLoad = state.powerGenerated * 2.2 + Math.max(0, state.rotorSpeed - 18) * 0.18 + (state.brakingSystem ? 1.5 : 0);
-  const cooling = 0.55 + (state.windSpeed < 6 ? 0.25 : 0);
-  state.temperature = clamp(state.temperature + heatLoad - cooling, 25, 110);
-
-  state.vibration = clamp(1 + Math.pow(state.rotorSpeed / 18, 2) * 0.55 + Math.abs(state.yaw) / 180 * 0.9 + (state.brakingSystem ? 1.2 : 0), 1, 9.5);
+  state.vibration = clamp(
+    0.8
+      + Math.pow(state.rotorSpeed / 18, 1.7) * 0.55
+      + state.turbulence * 4.2
+      + Math.abs(yawError) / 180 * 1.15
+      + (state.brakingSystem ? 1.35 : 0),
+    0.8,
+    10,
+  );
 
   if (state.temperature > 96 || state.vibration > 6.5) {
     state.status = 'critical';
-  } else if (state.temperature > 82 || state.vibration > 4.3 || state.windSpeed > 24) {
+  } else if (state.temperature > 84 || state.vibration > 4.4 || state.windSpeed > 25 || Math.abs(yawError) > 35) {
     state.status = 'warning';
   } else {
     state.status = 'optimal';
   }
 
   if (state.aiAutoMode) {
-    if (state.windSpeed > 30 || state.temperature > 94 || state.vibration > 6) {
+    if (state.windSpeed > 30 || state.temperature > 94 || state.vibration > 5.8 || Math.abs(yawError) > 55) {
       state.brakingSystem = true;
-    } else if (state.brakingSystem && state.windSpeed < 25 && state.temperature < 82 && state.vibration < 4.5) {
+    } else if (state.brakingSystem && state.windSpeed < 24 && state.temperature < 82 && state.vibration < 4.2) {
       state.brakingSystem = false;
     }
   }
@@ -381,14 +432,30 @@ app.get('/api/reports', (req, res) => {
 });
 
 app.post('/api/control', (req, res) => {
-  const { bladePitch, yaw, brakingSystem, aiAutoMode } = req.body;
+  const {
+    bladePitch,
+    yaw,
+    brakingSystem,
+    aiAutoMode,
+    windSpeed,
+    windDirection,
+    airDensity,
+    ambientTemperature,
+    turbulence,
+  } = req.body;
+
   const previousBrakeState = state.brakingSystem;
   const previousAutoMode = state.aiAutoMode;
 
   if (typeof bladePitch === 'number') state.bladePitch = clamp(bladePitch, 0, 90);
-  if (typeof yaw === 'number') state.yaw = clamp(yaw, -180, 180);
+  if (typeof yaw === 'number') state.yaw = wrapAngle(yaw);
   if (typeof brakingSystem === 'boolean') state.brakingSystem = brakingSystem;
   if (typeof aiAutoMode === 'boolean') state.aiAutoMode = aiAutoMode;
+  if (typeof windSpeed === 'number') state.windSpeed = clamp(windSpeed, 0, 35);
+  if (typeof windDirection === 'number') state.windDirection = wrapAngle(windDirection);
+  if (typeof airDensity === 'number') state.airDensity = clamp(airDensity, 1.0, 1.32);
+  if (typeof ambientTemperature === 'number') state.ambientTemperature = clamp(ambientTemperature, -10, 45);
+  if (typeof turbulence === 'number') state.turbulence = clamp(turbulence, 0.02, 0.45);
 
   if (previousAutoMode !== state.aiAutoMode) {
     createAlert('info', `AI Auto Mode ${state.aiAutoMode ? 'enabled' : 'disabled'} by operator.`);
@@ -416,7 +483,12 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: ['**/.runtime/**', '**/data/**', '**/.env', '**/telemetry-history.json'],
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

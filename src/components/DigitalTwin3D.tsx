@@ -88,24 +88,45 @@ function WindTurbine({ state }: { state: TelemetryState }) {
 }
 
 export default function DigitalTwin3D({ state }: DigitalTwin3DProps) {
+  const windDirectionRad = THREE.MathUtils.degToRad(state.windDirection);
+  const windStrength = 0.2 + state.windSpeed / 18;
+
   return (
     <div className="w-full h-full bg-slate-950">
       <Canvas shadows camera={{ position: [5, 2, 4], fov: 50 }}>
         <color attach="background" args={['#020617']} />
+        <fog attach="fog" args={['#020617', 8, 22]} />
         
-        <ambientLight intensity={0.5} />
+        <ambientLight intensity={0.45 + windStrength * 0.15} />
         <directionalLight 
           position={[10, 10, 5]} 
-          intensity={1} 
+          intensity={0.95 + windStrength * 0.2} 
           castShadow 
           shadow-mapSize-width={1024} 
           shadow-mapSize-height={1024} 
         />
-        <pointLight position={[-10, -10, -10]} intensity={0.2} />
+        <pointLight position={[-10, -10, -10]} intensity={0.18} />
+        <pointLight position={[0, 6, 4]} intensity={0.35 + windStrength * 0.15} color={state.status === 'critical' ? '#ef4444' : state.status === 'warning' ? '#f59e0b' : '#22d3ee'} />
 
         <Environment preset="city" />
 
         <WindTurbine state={state} />
+
+        <group position={[0, 3.2, -3.2]} rotation={[0, windDirectionRad, 0]}>
+          <mesh>
+            <cylinderGeometry args={[0.04, 0.04, 2.2, 10]} />
+            <meshStandardMaterial color="#67e8f9" emissive="#22d3ee" emissiveIntensity={0.6} transparent opacity={0.75} />
+          </mesh>
+          <mesh position={[0, 1.35, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <coneGeometry args={[0.16, 0.45, 12]} />
+            <meshStandardMaterial color="#67e8f9" emissive="#22d3ee" emissiveIntensity={0.8} transparent opacity={0.9} />
+          </mesh>
+        </group>
+
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.05, 0]} receiveShadow>
+          <planeGeometry args={[18, 18]} />
+          <meshStandardMaterial color="#020617" roughness={1} metalness={0} transparent opacity={0.55} />
+        </mesh>
 
         <ContactShadows 
           position={[0, -2, 0]} 
@@ -123,6 +144,10 @@ export default function DigitalTwin3D({ state }: DigitalTwin3DProps) {
           font="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyeMZhrib2Bg-4.ttf"
         >
           {`AURA_SYS_${state.status.toUpperCase()}`}
+        </Text>
+
+        <Text position={[-2, 0.4, 0]} color="#67e8f9" fontSize={0.18}>
+          {`WIND ${state.windSpeed.toFixed(1)} m/s | TURB ${state.turbulence.toFixed(2)} | YAW ${state.yaw.toFixed(0)}°`}
         </Text>
 
         <OrbitControls 

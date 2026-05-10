@@ -16,9 +16,11 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Keep runtime file writes out of the watcher so telemetry persistence does not reload the page.
       hmr: process.env.DISABLE_HMR !== 'true',
+      watch: {
+        ignored: ['**/.runtime/**', '**/data/**', '**/.env', '**/telemetry-history.json'],
+      },
     },
   };
 });

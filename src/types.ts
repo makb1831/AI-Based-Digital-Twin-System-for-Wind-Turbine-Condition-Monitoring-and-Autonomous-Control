@@ -1,5 +1,9 @@
 export interface TelemetryState {
   windSpeed: number;
+  windDirection: number;
+  airDensity: number;
+  ambientTemperature: number;
+  turbulence: number;
   rotorSpeed: number;
   powerGenerated: number;
   temperature: number;
@@ -34,11 +38,18 @@ export interface SystemReport {
   trend: {
     power: number;
     windSpeed: number;
+    windDirection: number;
     temperature: number;
     vibration: number;
   };
   recommendations: string[];
   recentAlerts: AlertEvent[];
+  environment: {
+    ambientTemperature: number;
+    airDensity: number;
+    turbulence: number;
+    windDirection: number;
+  };
 }
 
 export interface AIDiagnosticReport {
