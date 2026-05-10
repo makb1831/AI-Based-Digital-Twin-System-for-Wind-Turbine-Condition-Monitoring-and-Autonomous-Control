@@ -1,0 +1,6 @@
+{
+  "name": "Aura Twin: Smart Turbine AI",
+  "description": "An AI-powered digital twin of a smart wind turbine system with real-time 3D simulation, interactive controls, telemetry monitoring, and Gemini predictive insights.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
