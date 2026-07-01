@@ -16,11 +16,19 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      host: '0.0.0.0',
+      port: 3000,
+      strictPort: true,
       // Keep runtime file writes out of the watcher so telemetry persistence does not reload the page.
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: {
         ignored: ['**/.runtime/**', '**/data/**', '**/.env', '**/telemetry-history.json'],
       },
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 4173,
+      strictPort: true,
     },
   };
 });

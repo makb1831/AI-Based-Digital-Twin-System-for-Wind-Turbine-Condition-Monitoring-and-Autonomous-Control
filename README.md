@@ -1,20 +1,38 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Aura Twin
 
-# Run and deploy your AI Studio app
+AI-based digital twin for wind turbine condition monitoring, autonomous control, and report generation.
 
-This contains everything you need to run your app locally.
+## Run locally
 
-View your app in AI Studio: https://ai.studio/apps/d95548ca-3599-4a26-81cd-7f6dd61524b6
+**Prerequisites:** Node.js
 
-## Run Locally
+1. Install dependencies with `npm install`.
+2. Set `GEMINI_API_KEY` in [.env.local](.env.local) or your shell.
+3. Start the app with `npm run dev`.
 
-**Prerequisites:**  Node.js
+The app runs on `http://localhost:3000`.
 
+## Screenshot pages
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Use these routes in the browser for clean, separate screenshots:
+
+| Page | URL | Best use |
+| --- | --- | --- |
+| Overview | `http://localhost:3000/overview` | Landing page and high-level system view |
+| 3D turbine | `http://localhost:3000/turbine` | Full scene capture |
+| Metrics | `http://localhost:3000/metrics` | Dashboard cards and trend chart |
+| Controls | `http://localhost:3000/controls` | Sliders, mode switch, and brake control |
+| AI | `http://localhost:3000/ai` | Health score, analysis, and recommendation |
+| Reports | `http://localhost:3000/reports` | Session statistics, alerts, and AI summary |
+
+If you open the root URL, it will land on the overview page.
+
+## Build
+
+1. Run `npm run build`.
+2. Preview the production build with `npm run start` after the build completes.
+
+## Notes
+
+- The backend reads `GEMINI_API_KEY` for the Gemini integration.
+- Runtime telemetry is written to `.runtime/` so the dev server stays stable.

@@ -20,7 +20,8 @@ const io = new Server(httpServer, {
   },
 });
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT ?? 3000);
+const HOST = process.env.HOST ?? '0.0.0.0';
 const DATA_DIR = path.join(process.cwd(), '.runtime');
 const HISTORY_FILE = path.join(DATA_DIR, 'telemetry-history.json');
 const HISTORY_LIMIT = 720;
@@ -500,7 +501,7 @@ async function startServer() {
     });
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, HOST, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
